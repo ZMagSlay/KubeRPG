@@ -28,11 +28,13 @@ const RARITIES = Object.keys(RARITY_MULT);
 let accounts = loadAccounts();
 let party = []; // array of pseudos
 let selectedPlayer = null; // pseudo
+let splitScreenEnabled = false;
 
-// Canvas and map
+// Canvas and map (primary)
 const canvas = document.getElementById('map');
-const ctx = canvas.getContext('2d');
-const W = canvas.width, H = canvas.height;
+let secondaryCanvas = null;
+let ctx = canvas.getContext('2d');
+let W = canvas.width, H = canvas.height;
 
 // Simple map buildings
 const buildings = [
@@ -100,10 +102,41 @@ function renderInventory(){
   acc.inventory.forEach(item=>{
     const div = document.createElement('div'); div.className='itemCard itemRarity-'+item.rarity;
     div.innerHTML = `<strong>${item.type}</strong> <span class="small">(${item.rarity})</span><div class="small">${JSON.stringify(item.stats)}</div>`;
-    const eqBtn = document.createElement('button'); eqBtn.textContent = item.equipped? 'Déséquiper':'Équiper';
-    eqBtn.onclick = ()=>{ item.equipped=!item.equipped; saveAccounts(accounts); renderInventory(); };
+    const eqBtn = document.createElement('button');
+    // determine if it's currently equipped in a slot
+    const slot = findEquippedSlot(acc, item.id);
+    eqBtn.textContent = slot? 'Déséquiper':'Équiper';
+    eqBtn.onclick = ()=>{
+      if(slot){ unequipItem(acc, slot); }
+      else { equipItem(acc, item); }
+      saveAccounts(accounts); renderInventory(); renderEquippedPanel();
+    };
     div.appendChild(eqBtn);
     inventoryListEl.appendChild(div);
+  });
+}
+
+function findEquippedSlot(acc, itemId){
+  if(!acc.equipped) return null;
+  for(const slot in acc.equipped){ if(acc.equipped[slot] && acc.equipped[slot].id===itemId) return slot; }
+  return null;
+}
+
+function equipItem(acc, item){
+  if(!acc.equipped) acc.equipped = {};
+  acc.equipped[item.type] = item; // one slot per type
+}
+
+function unequipItem(acc, slot){ if(acc.equipped) acc.equipped[slot]=null; }
+
+function renderEquippedPanel(){
+  const panel = document.getElementById('equippedSlots');
+  if(!selectedPlayer) return;
+  const acc = accounts[selectedPlayer];
+  ['Sword','Orbe','Halo'].forEach(type=>{
+    const span = panel.querySelector(`[data-item="${type}"]`);
+    const it = acc.equipped && acc.equipped[type];
+    span.textContent = it? `${it.type} (${it.rarity})` : '—';
   });
 }
 
@@ -134,15 +167,25 @@ joinGroupBtn.addEventListener('click', ()=>{
 
 // Movement controls (move selected player)
 document.addEventListener('keydown', e=>{
-  if(!selectedPlayer) return;
-  const p = runtimePlayers[selectedPlayer];
-  if(!p) return;
   const step = 8;
-  if(e.key==='ArrowUp' || e.key==='w') p.y-=step;
-  if(e.key==='ArrowDown' || e.key==='s') p.y+=step;
-  if(e.key==='ArrowLeft' || e.key==='a') p.x-=step;
-  if(e.key==='ArrowRight' || e.key==='d') p.x+=step;
+  if(splitScreenEnabled && party.length>=2){
+    // WASD -> party[0], Arrows -> party[1]
+    const p0 = runtimePlayers[party[0]]; const p1 = runtimePlayers[party[1]];
+    if(p0){ if(['w','a','s','d'].includes(e.key)) handleKeyForPlayer(e.key, p0, step); }
+    if(p1){ if(['ArrowUp','ArrowLeft','ArrowDown','ArrowRight'].includes(e.key)) handleKeyForPlayer(e.key, p1, step); }
+  } else {
+    if(!selectedPlayer) return;
+    const p = runtimePlayers[selectedPlayer]; if(!p) return;
+    if(['w','a','s','d','ArrowUp','ArrowLeft','ArrowDown','ArrowRight'].includes(e.key)) handleKeyForPlayer(e.key, p, step);
+  }
 });
+
+function handleKeyForPlayer(key, playerRuntime, step){
+  if(key==='ArrowUp' || key==='w') playerRuntime.y-=step;
+  if(key==='ArrowDown' || key==='s') playerRuntime.y+=step;
+  if(key==='ArrowLeft' || key==='a') playerRuntime.x-=step;
+  if(key==='ArrowRight' || key==='d') playerRuntime.x+=step;
+}
 
 // Canvas interactions (click on building)
 canvas.addEventListener('click', e=>{
@@ -186,45 +229,63 @@ function handleBuildingInteract(b){
 
 // --- Rendering loop ---
 function draw(){
+  // render to primary (and secondary if enabled)
+  W = canvas.width; H = canvas.height;
   ctx.clearRect(0,0,W,H);
+  if(splitScreenEnabled && secondaryCanvas){
+    renderViewport(ctx, W, H, party[0] ? runtimePlayers[party[0]] : null);
+    // secondary
+    const ctx2 = secondaryCanvas.getContext('2d');
+    const W2 = secondaryCanvas.width, H2 = secondaryCanvas.height;
+    ctx2.clearRect(0,0,W2,H2);
+    renderViewport(ctx2, W2, H2, party[1] ? runtimePlayers[party[1]] : null);
+  } else {
+    renderViewport(ctx, W, H, null);
+  }
+  requestAnimationFrame(draw);
+}
+requestAnimationFrame(draw);
+
+function renderViewport(context, width, height, focusPlayer){
+  context.save();
+  // compute camera center
+  let cx = width/2, cy = height/2;
+  if(focusPlayer){ cx = focusPlayer.x; cy = focusPlayer.y; }
+  // translate so that camera center maps to canvas center
+  context.translate(Math.round(width/2 - cx), Math.round(height/2 - cy));
   // draw buildings
   buildings.forEach(b=>{
-    ctx.fillStyle = b.color; ctx.fillRect(b.x,b.y,b.w,b.h);
-    ctx.fillStyle = '#fff'; ctx.font = '14px sans-serif'; ctx.fillText(b.name, b.x+8, b.y+20);
+    context.fillStyle = b.color; context.fillRect(b.x,b.y,b.w,b.h);
+    context.fillStyle = '#fff'; context.font = '14px sans-serif'; context.fillText(b.name, b.x+8, b.y+20);
   });
   // draw players
   for(const pseudo of party){
     const acc = accounts[pseudo];
     if(!runtimePlayers[pseudo]) runtimePlayers[pseudo] = {x:100+Math.random()*600,y:100+Math.random()*400, hp:20, maxHp:20};
     const p = runtimePlayers[pseudo];
-    // derived stats from equipped items
     const stats = computePlayerStats(acc);
-    p.maxHp = stats.hp;
-    if(!p.hp) p.hp = p.maxHp;
-
-    // cube
-    ctx.fillStyle = acc.color; ctx.fillRect(p.x-16, p.y-16, 32, 32);
-    // pseudo label above cube
-    ctx.fillStyle = acc.color; ctx.font = '12px sans-serif'; ctx.fillText(pseudo, p.x-16, p.y-22);
-    // hp bar
-    ctx.fillStyle = '#222'; ctx.fillRect(p.x-20,p.y+20,40,6);
-    ctx.fillStyle = '#f55'; ctx.fillRect(p.x-20,p.y+20,40*Math.max(0,p.hp)/p.maxHp,6);
+    p.maxHp = stats.hp; if(!p.hp) p.hp = p.maxHp;
+    context.fillStyle = acc.color; context.fillRect(p.x-16, p.y-16, 32, 32);
+    context.fillStyle = acc.color; context.font = '12px sans-serif'; context.fillText(pseudo, p.x-16, p.y-22);
+    context.fillStyle = '#222'; context.fillRect(p.x-20,p.y+20,40,6);
+    context.fillStyle = '#f55'; context.fillRect(p.x-20,p.y+20,40*Math.max(0,p.hp)/p.maxHp,6);
   }
-  requestAnimationFrame(draw);
+  context.restore();
 }
-requestAnimationFrame(draw);
 
 // --- Stats and combat ---
 function computePlayerStats(acc){
   // base stats
   let hp = 30; let dmg = 4; let def = 0;
-  acc.inventory.forEach(it=>{
-    if(it.equipped){
+  if(acc.equipped){
+    for(const slot of ['Sword','Orbe','Halo']){
+      const it = acc.equipped[slot];
+      if(!it) continue;
       if(it.type==='Sword') dmg += it.stats.damage * (RARITY_MULT[it.rarity]||1);
       if(it.type==='Orbe') def += it.stats.defense * (RARITY_MULT[it.rarity]||1);
       if(it.type==='Halo') hp += it.stats.hp * (RARITY_MULT[it.rarity]||1);
     }
-  });
+  }
   // scale with level
   hp = Math.ceil(hp * (1 + (acc.progress.level-1)*0.08));
   dmg = Math.ceil(dmg * (1 + (acc.progress.level-1)*0.06));
@@ -233,55 +294,46 @@ function computePlayerStats(acc){
 }
 
 // --- Combat system (simple turn-based simulator) ---
-function startCombat(players, enemies){
+function startCombat(players, enemies, callback){
   // players: array of pseudos; enemies: array of objects {name,hp,dmg,def,id}
   log('Combat engagé — préparation...');
-  // prepare runtime combat copies
   const partyState = players.map(pseudo=>{
     const acc = accounts[pseudo];
     const s = computePlayerStats(acc);
     return {pseudo, hp:s.hp, maxHp:s.hp, dmg:s.dmg, def:s.def};
   });
   const enemyState = enemies.map((e,i)=> ({...e, id:i}));
-
-  // turn order: all players then all enemies
-  const rounds = [];
-  // queue is players then enemies per round
   let round = 1;
-
   function combatRound(){
     log(`--- Round ${round} ---`);
     // players act
     for(const p of partyState){
       if(p.hp<=0) continue;
-      // choose target: first alive enemy
       const target = enemyState.find(en=>en.hp>0);
       if(!target) break;
-      // compute damage
       const dmg = Math.max(1, p.dmg - target.def);
       target.hp -= dmg;
       log(`${p.pseudo} attaque ${target.name} pour ${dmg} dégâts (${Math.max(0,target.hp)}/${target.maxHp||'?'})`);
-      if(target.hp<=0){
-        log(`${target.name} vaincu !`);
-      }
+      if(target.hp<=0) log(`${target.name} vaincu !`);
     }
     // enemies act
     for(const e of enemyState){
       if(e.hp<=0) continue;
       const target = partyState.find(pl=>pl.hp>0);
-      if(!target) break; // party defeated
+      if(!target) break;
       const dmg = Math.max(1, e.dmg - target.def);
       target.hp -= dmg;
       log(`${e.name} attaque ${target.pseudo} pour ${dmg} dégâts (${Math.max(0,target.hp)}/${target.maxHp})`);
       if(target.hp<=0) log(`${target.pseudo} est KO`);
     }
-
-    // check end
     const allEnemiesDead = enemyState.every(e=>e.hp<=0);
     const allPlayersDead = partyState.every(p=>p.hp<=0);
     if(allEnemiesDead || allPlayersDead){
-      if(allEnemiesDead){ log('Victoire !'); onCombatWin(players, enemyState); }
-      else { log('Défaite...'); }
+      if(allEnemiesDead){ log('Victoire !');
+        const drops = generateDrops(enemyState);
+        if(typeof callback==='function') callback(true, drops);
+        else onCombatWin(players, enemyState);
+      } else { log('Défaite...'); if(typeof callback==='function') callback(false, []); }
       return;
     }
     round++; setTimeout(combatRound, 800);
@@ -289,11 +341,9 @@ function startCombat(players, enemies){
   setTimeout(combatRound, 300);
 }
 
-function onCombatWin(players, enemyState){
-  // drop items for each enemy
+function generateDrops(enemyState){
   const drops = [];
   enemyState.forEach(e=>{
-    // each enemy drops 0-2 items
     const ct = Math.random()<0.7?1: Math.random()<0.3?2:0;
     for(let i=0;i<ct;i++){
       const rarity = weightedRarity();
@@ -302,15 +352,19 @@ function onCombatWin(players, enemyState){
       drops.push(makeItem(type, rarity, Math.max(1, Math.round(basePower * (RARITY_MULT[rarity]||1)))));
     }
   });
+  return drops;
+}
+
+function onCombatWin(players, enemyState){
+  const drops = generateDrops(enemyState);
   if(drops.length===0) log('Aucun butin trouvé.');
   else{
     log(`Butin trouvé: ${drops.length} objets`);
-    // give drops to first party member (simple)
     const receiver = players[0];
     const acc = accounts[receiver];
     acc.inventory.push(...drops);
     saveAccounts(accounts);
-    renderInventory();
+    renderInventory(); renderEquippedPanel();
   }
 }
 
@@ -324,11 +378,10 @@ function weightedRarity(){
 
 // --- Dungeon waves ---
 function startDungeon(){
-  // simple wave progression
+  // wave loop that waits for combat to finish before prompting
   let wave = 1;
   function spawnWave(){
     log(`Donjon: vague ${wave}`);
-    // create enemies scaled to wave
     const enemies = [];
     const count = 1 + Math.floor(Math.random()* (1 + Math.floor(wave/2)));
     for(let i=0;i<count;i++){
@@ -338,13 +391,19 @@ function startDungeon(){
       const def = Math.floor(level/2);
       enemies.push({name:`Squelette L${level}`, hp:baseHp, maxHp:baseHp, dmg:baseDmg, def, level});
     }
-    startCombat(party, enemies);
-    wave++;
-    // after a delay, if party still exists ask to continue
-    setTimeout(()=>{
-      if(confirm('Continuer à la vague suivante ?')) spawnWave();
-      else log('Sortie du donjon.');
-    }, 3000 + enemies.length*1000);
+    startCombat(party, enemies, (win, drops)=>{
+      if(!win){ log('Le groupe a été vaincu. Fin du donjon.'); return; }
+      // apply drops
+      if(drops && drops.length>0){
+        const receiver = party[0]; const acc = accounts[receiver]; acc.inventory.push(...drops); saveAccounts(accounts); renderInventory(); renderEquippedPanel();
+        log(`Récompenses distribuées (${drops.length})`);
+      }
+      // ask to continue
+      setTimeout(()=>{
+        if(confirm('Continuer à la vague suivante ?')){ wave++; spawnWave(); }
+        else log('Sortie du donjon.');
+      }, 300);
+    });
   }
   spawnWave();
 }
@@ -352,6 +411,24 @@ function startDungeon(){
 // --- Init ---
 function init(){
   renderAccounts(); renderParty(); renderInventory();
+  renderEquippedPanel();
+  // autosave every 10s
+  setInterval(()=>{ saveAccounts(accounts); log('Autosave'); }, 10000);
+  // split-screen toggle
+  const toggle = document.getElementById('toggleSplit');
+  toggle.addEventListener('click', ()=>{
+    splitScreenEnabled = !splitScreenEnabled;
+    toggle.textContent = splitScreenEnabled? 'Désactiver Split-Screen' : 'Activer Split-Screen';
+    if(splitScreenEnabled){
+      if(!secondaryCanvas){
+        secondaryCanvas = document.createElement('canvas'); secondaryCanvas.id='mapRight'; secondaryCanvas.width=380; secondaryCanvas.height=600;
+        document.getElementById('gameArea').appendChild(secondaryCanvas);
+      }
+    } else {
+      if(secondaryCanvas){ secondaryCanvas.remove(); secondaryCanvas = null; }
+    }
+  });
   log('Prototype prêt. Créez un compte puis joignez-le au groupe.');
 }
 init();
+

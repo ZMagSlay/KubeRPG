@@ -18,4 +18,10 @@ canvas{background:linear-gradient(#6fb3ff20,#2b78a520);border:6px solid rgba(255
 .itemRarity-Legendary{border-left:4px solid #ffb24c}
 .small{font-size:12px;color:#bcd}
 .controls{margin-top:8px}
-`
+.slot{padding:6px;background:#07111a;border-radius:6px;margin:6px 0}
+#gameArea{flex:1;background:linear-gradient(#18304a,#0b2030);display:flex;align-items:center;justify-content:center}
+#mapLeft,#mapRight{background:linear-gradient(#6fb3ff10,#2b78a510);border:6px solid rgba(255,255,255,0.03);border-radius:8px}
+#mapRight{margin-left:8px}
+@media(min-width:1100px){
+	#gameArea{padding:8px}
+}
