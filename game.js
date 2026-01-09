@@ -29,6 +29,7 @@ let accounts = loadAccounts();
 let party = []; // array of pseudos
 let selectedPlayer = null; // pseudo
 let splitScreenEnabled = false;
+let inCombat = false;
 
 // Canvas and map (primary)
 const canvas = document.getElementById('map');
@@ -232,15 +233,24 @@ function draw(){
   // render to primary (and secondary if enabled)
   W = canvas.width; H = canvas.height;
   ctx.clearRect(0,0,W,H);
-  if(splitScreenEnabled && secondaryCanvas){
-    renderViewport(ctx, W, H, party[0] ? runtimePlayers[party[0]] : null);
-    // secondary
-    const ctx2 = secondaryCanvas.getContext('2d');
-    const W2 = secondaryCanvas.width, H2 = secondaryCanvas.height;
-    ctx2.clearRect(0,0,W2,H2);
-    renderViewport(ctx2, W2, H2, party[1] ? runtimePlayers[party[1]] : null);
+  if(inCombat && window.__combat){
+    renderCombatViewport(ctx, W, H, window.__combat);
+    if(splitScreenEnabled && secondaryCanvas){
+      const ctx2 = secondaryCanvas.getContext('2d'); const W2 = secondaryCanvas.width, H2 = secondaryCanvas.height;
+      ctx2.clearRect(0,0,W2,H2);
+      renderCombatViewport(ctx2, W2, H2, window.__combat);
+    }
   } else {
-    renderViewport(ctx, W, H, null);
+    if(splitScreenEnabled && secondaryCanvas){
+      renderViewport(ctx, W, H, party[0] ? runtimePlayers[party[0]] : null);
+      // secondary
+      const ctx2 = secondaryCanvas.getContext('2d');
+      const W2 = secondaryCanvas.width, H2 = secondaryCanvas.height;
+      ctx2.clearRect(0,0,W2,H2);
+      renderViewport(ctx2, W2, H2, party[1] ? runtimePlayers[party[1]] : null);
+    } else {
+      renderViewport(ctx, W, H, null);
+    }
   }
   requestAnimationFrame(draw);
 }
@@ -355,6 +365,111 @@ function generateDrops(enemyState){
   return drops;
 }
 
+// Combat runner (grid-based, simple AI for players and enemies)
+function runCombatRound(combat, onFinished){
+  let round = 1;
+  function step(){
+    log(`--- Round ${round} ---`);
+    // players turn
+    const players = combat.units.filter(u=>u.type==='player' && u.hp>0);
+    const enemies = combat.units.filter(u=>u.type==='enemy' && u.hp>0);
+    // players act (simple AI: move toward closest enemy and attack if adjacent)
+    for(const p of players){
+      const target = findClosest(p, enemies);
+      if(!target) continue;
+      const dist = Math.abs(p.x-target.x) + Math.abs(p.y-target.y);
+      if(dist>1){
+        // move one step towards
+        if(p.x < target.x) p.x++;
+        else if(p.x > target.x) p.x--;
+        else if(p.y < target.y) p.y++;
+        else if(p.y > target.y) p.y--;
+      }
+      // recompute dist
+      const nd = Math.abs(p.x-target.x) + Math.abs(p.y-target.y);
+      if(nd<=1){
+        const dmg = Math.max(1, p.dmg - (target.def||0));
+        target.hp -= dmg;
+        log(`${p.pseudo} attaque ${target.name||target.id} pour ${dmg} dégâts (${Math.max(0,target.hp)}/${target.maxHp})`);
+      }
+    }
+    // enemies turn
+    for(const e of enemies){
+      const target = findClosest(e, players);
+      if(!target) continue;
+      const dist = Math.abs(e.x-target.x) + Math.abs(e.y-target.y);
+      if(dist>1){
+        if(e.x < target.x) e.x++;
+        else if(e.x > target.x) e.x--;
+        else if(e.y < target.y) e.y++;
+        else if(e.y > target.y) e.y--;
+      }
+      const nd = Math.abs(e.x-target.x) + Math.abs(e.y-target.y);
+      if(nd<=1){
+        const dmg = Math.max(1, e.dmg - (target.def||0));
+        target.hp -= dmg;
+        log(`${e.name} attaque ${target.pseudo} pour ${dmg} dégâts (${Math.max(0,target.hp)}/${target.maxHp})`);
+      }
+    }
+
+    // cleanup and check end
+    const playersAlive = combat.units.filter(u=>u.type==='player' && u.hp>0).length;
+    const enemiesAlive = combat.units.filter(u=>u.type==='enemy' && u.hp>0).length;
+    if(enemiesAlive===0 || playersAlive===0){
+      // finished
+      setTimeout(()=> onFinished(), 300);
+      return;
+    }
+    round++; setTimeout(step, 600);
+  }
+  setTimeout(step, 300);
+}
+
+function findClosest(unit, targets){
+  if(!targets || targets.length===0) return null;
+  let best = null; let bd = Infinity;
+  for(const t of targets){
+    const d = Math.abs(unit.x - t.x) + Math.abs(unit.y - t.y);
+    if(d < bd){ bd = d; best = t; }
+  }
+  return best;
+}
+
+// Combat rendering: draws a simple grid and units when `inCombat` is true
+function renderCombatViewport(context, width, height, combat){
+  context.save();
+  // compute scale to center grid
+  const tile = combat.tile || 64;
+  const gw = combat.cols * tile; const gh = combat.rows * tile;
+  const ox = Math.max(0, Math.floor((width - gw)/2));
+  const oy = Math.max(0, Math.floor((height - gh)/2));
+  // background
+  context.fillStyle = '#123'; context.fillRect(ox-8, oy-8, gw+16, gh+16);
+  // grid
+  for(let r=0;r<combat.rows;r++){
+    for(let c=0;c<combat.cols;c++){
+      const x = ox + c*tile; const y = oy + r*tile;
+      context.fillStyle = (c%2 ^ r%2)? '#0b2a3a' : '#0f3447';
+      context.fillRect(x,y,tile-2,tile-2);
+    }
+  }
+  // units
+  combat.units.forEach(u=>{
+    const x = ox + u.x*tile + 8; const y = oy + u.y*tile + 8; const size = tile-16;
+    if(u.type==='player') context.fillStyle = (accounts[u.pseudo] && accounts[u.pseudo].color) || '#4caf50';
+    else context.fillStyle = '#a24c4c';
+    context.fillRect(x,y,size,size);
+    // hp bar
+    context.fillStyle = '#222'; context.fillRect(x, y+size+6, size, 8);
+    context.fillStyle = '#f55'; context.fillRect(x, y+size+6, Math.max(0,size * (u.hp/u.maxHp)), 8);
+    // label
+    context.fillStyle = '#fff'; context.font = '12px sans-serif';
+    const label = u.type==='player'? u.pseudo : u.name;
+    context.fillText(label, x, y-6);
+  });
+  context.restore();
+}
+
 function onCombatWin(players, enemyState){
   const drops = generateDrops(enemyState);
   if(drops.length===0) log('Aucun butin trouvé.');
@@ -378,33 +493,75 @@ function weightedRarity(){
 
 // --- Dungeon waves ---
 function startDungeon(){
-  // wave loop that waits for combat to finish before prompting
+  // Grid-based dungeon: turn-based on a tiled board with simple AI
+  if(party.length===0){ return alert('Former un groupe local d\'abord (sélectionnez un compte puis "Joindre au groupe").'); }
+  inCombat = true;
+  const GRID_COLS = 8;
+  const GRID_ROWS = 6;
+  const TILE = 64; // px for rendering
+
   let wave = 1;
+
   function spawnWave(){
     log(`Donjon: vague ${wave}`);
-    const enemies = [];
+    // build combat state
+    const combat = {cols:GRID_COLS, rows:GRID_ROWS, tile:TILE, units:[], wave};
+
+    // spawn players at left column
+    let yidx = 1;
+    for(const pseudo of party){
+      const acc = accounts[pseudo];
+      if(!acc) continue;
+      const s = computePlayerStats(acc);
+      const unit = {id:`p_${pseudo}`, type:'player', pseudo, hp:s.hp, maxHp:s.hp, dmg:s.dmg, def:s.def, x:0, y:Math.min(GRID_ROWS-1, yidx), accName: pseudo};
+      combat.units.push(unit);
+      yidx += 2;
+    }
+
+    // spawn enemies on right column
     const count = 1 + Math.floor(Math.random()* (1 + Math.floor(wave/2)));
     for(let i=0;i<count;i++){
       const level = wave + Math.floor(Math.random()*2);
       const baseHp = 10 + level*5;
       const baseDmg = 2 + level*2;
       const def = Math.floor(level/2);
-      enemies.push({name:`Squelette L${level}`, hp:baseHp, maxHp:baseHp, dmg:baseDmg, def, level});
+      const e = {id:`e_${i}`, type:'enemy', name:`Squelette L${level}`, hp:baseHp, maxHp:baseHp, dmg:baseDmg, def, level, x:GRID_COLS-1, y: Math.min(GRID_ROWS-1, i*2)};
+      combat.units.push(e);
     }
-    startCombat(party, enemies, (win, drops)=>{
-      if(!win){ log('Le groupe a été vaincu. Fin du donjon.'); return; }
-      // apply drops
-      if(drops && drops.length>0){
+
+    // attach combat to global for rendering
+    window.__combat = combat;
+
+    // run turn loop
+    runCombatRound(combat, ()=>{
+      // callback when wave finished
+      const playersAlive = combat.units.filter(u=>u.type==='player' && u.hp>0).length;
+      const enemiesAlive = combat.units.filter(u=>u.type==='enemy' && u.hp>0).length;
+      if(playersAlive===0){
+        log('Le groupe a été vaincu. Fin du donjon.');
+        // return players to village left
+        party.forEach(pseudo=>{ runtimePlayers[pseudo] = {x:100+Math.random()*80, y:400+Math.random()*80}; });
+        inCombat = false; delete window.__combat;
+        return;
+      }
+      // victory
+      log('Vague terminée — victoire');
+      // drops and rewards
+      const drops = generateDrops(combat.units.filter(u=>u.type==='enemy'));
+      if(drops.length>0){
         const receiver = party[0]; const acc = accounts[receiver]; acc.inventory.push(...drops); saveAccounts(accounts); renderInventory(); renderEquippedPanel();
         log(`Récompenses distribuées (${drops.length})`);
       }
+      // reset player positions to left
+      party.forEach((pseudo,idx)=>{ runtimePlayers[pseudo] = {x:120, y:120 + idx*60}; });
       // ask to continue
       setTimeout(()=>{
         if(confirm('Continuer à la vague suivante ?')){ wave++; spawnWave(); }
-        else log('Sortie du donjon.');
+        else { inCombat = false; delete window.__combat; log('Sortie du donjon.'); }
       }, 300);
     });
   }
+
   spawnWave();
 }
 
