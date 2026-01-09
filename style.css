@@ -1,0 +1,21 @@
+*{box-sizing:border-box;font-family:Inter,Segoe UI,Arial,sans-serif}
+body{margin:0;display:flex;height:100vh}
+#ui{width:320px;padding:16px;background:#0f1724;color:#e6eef8;overflow:auto}
+#ui h2{margin:8px 0;font-size:14px}
+#ui button,input{padding:8px;margin:6px 0;border-radius:6px;border:1px solid rgba(255,255,255,0.08);background:#0b1220;color:inherit}
+#ui input[type=color]{padding:2px;height:36px}
+#gameArea{flex:1;background:linear-gradient(#18304a,#0b2030);display:flex;align-items:center;justify-content:center}
+canvas{background:linear-gradient(#6fb3ff20,#2b78a520);border:6px solid rgba(255,255,255,0.03);border-radius:8px}
+.accountItem{display:flex;align-items:center;gap:8px;padding:6px;border-radius:6px;background:#07111a;margin:6px 0}
+.accountColor{width:20px;height:20px;border-radius:4px}
+.pseudoLabel{font-weight:600}
+.partyMember{padding:6px 8px;background:#071826;border-radius:6px;margin:4px 0}
+#log{max-height:180px;overflow:auto;background:#07111a;padding:8px;border-radius:6px}
+.itemCard{padding:6px;border-radius:6px;background:#071826;margin:6px 0}
+.itemRarity-Common{border-left:4px solid #666}
+.itemRarity-Rare{border-left:4px solid #2ca5ff}
+.itemRarity-Epic{border-left:4px solid #a24cff}
+.itemRarity-Legendary{border-left:4px solid #ffb24c}
+.small{font-size:12px;color:#bcd}
+.controls{margin-top:8px}
+`

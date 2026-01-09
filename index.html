@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>KubeRPG — Prototype local</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="ui">
+    <section id="accounts">
+      <h2>Comptes locaux</h2>
+      <form id="createAccountForm">
+        <input id="pseudo" placeholder="Pseudo" required />
+        <input id="color" type="color" value="#4caf50" />
+        <button type="submit">Créer / Sélectionner</button>
+      </form>
+      <div id="accountsList"></div>
+      <button id="joinGroup">Joindre au groupe</button>
+    </section>
+
+    <section id="party">
+      <h2>Groupe</h2>
+      <div id="partyList">Aucun membre</div>
+      <button id="enterDungeon">Entrer dans le donjon</button>
+    </section>
+
+    <section id="inventoryPanel">
+      <h2>Inventaire</h2>
+      <div id="inventoryList">Vide</div>
+    </section>
+
+    <section id="combatLog">
+      <h2>Combat</h2>
+      <div id="log"></div>
+    </section>
+  </div>
+
+  <div id="gameArea">
+    <canvas id="map" width="800" height="600"></canvas>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
